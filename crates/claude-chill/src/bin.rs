@@ -1,41 +1,42 @@
-use claude_chill::proxy::{Proxy, ProxyConfig};
-use std::env;
-use std::process::ExitCode;
-use std::str::FromStr;
+mod cli;
 
-fn parse_env_var<T: FromStr>(key: &str, default: T) -> T {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
+use clap::Parser;
+use claude_chill::config::Config;
+use claude_chill::key_parser;
+use claude_chill::proxy::{Proxy, ProxyConfig};
+use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = env::args().collect();
+    let cli = cli::Cli::parse();
+    let config = Config::load();
 
-    if args.len() < 2 {
-        eprintln!("Usage: claude-chill <command> [args...]");
-        eprintln!();
-        eprintln!("PTY proxy that reduces terminal flicker by truncating synchronized output.");
-        eprintln!();
-        eprintln!("Environment variables:");
-        eprintln!("  CHILL_MAX_LINES    Max lines per sync block (default: 100)");
-        eprintln!("  CHILL_HISTORY      Max history lines for lookback (default: 100000)");
-        eprintln!();
-        eprintln!("Lookback mode: Press Ctrl+Shift+PgUp to view full history");
-        return ExitCode::from(1);
-    }
+    let max_lines = cli.max_lines.unwrap_or(config.max_lines);
+    let history_lines = cli.history_lines.unwrap_or(config.history_lines);
 
-    let command = &args[1];
-    let cmd_args: Vec<&str> = args[2..].iter().map(|s| s.as_str()).collect();
+    let lookback_key = cli
+        .lookback_key
+        .clone()
+        .unwrap_or_else(|| config.lookback_key.clone());
 
-    let config = ProxyConfig {
-        max_output_lines: parse_env_var("CHILL_MAX_LINES", 100),
-        max_history_lines: parse_env_var("CHILL_HISTORY", 100_000),
-        ..Default::default()
+    let lookback_sequence = match key_parser::parse(&lookback_key) {
+        Ok(key) => key.to_escape_sequence(),
+        Err(e) => {
+            eprintln!("Invalid lookback key '{}': {}", lookback_key, e);
+            eprintln!("Using default: [ctrl][shift][j]");
+            config.lookback_sequence()
+        }
     };
 
-    match Proxy::spawn(command, &cmd_args, config) {
+    let proxy_config = ProxyConfig {
+        max_output_lines: max_lines,
+        max_history_lines: history_lines,
+        lookback_key,
+        lookback_sequence,
+    };
+
+    let cmd_args: Vec<&str> = cli.args.iter().map(|s| s.as_str()).collect();
+
+    match Proxy::spawn(&cli.command, &cmd_args, proxy_config) {
         Ok(mut proxy) => match proxy.run() {
             Ok(exit_code) => ExitCode::from(exit_code as u8),
             Err(e) => {

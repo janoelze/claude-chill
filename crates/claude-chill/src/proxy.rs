@@ -1,8 +1,8 @@
 use crate::escape_parser::{EscapeParser, ParsedEscape};
 use crate::escape_sequences::{
-    CLEAR_SCREEN, CLEAR_SCROLLBACK, CURSOR_HOME, INPUT_BUFFER_CAPACITY, LOOKBACK_HEADER,
-    OUTPUT_BUFFER_CAPACITY, PASSTHROUGH_BUFFER_CAPACITY, PENDING_ESCAPE_CAPACITY,
-    SYNC_BUFFER_CAPACITY, SYNC_END, SYNC_START,
+    CLEAR_SCREEN, CLEAR_SCROLLBACK, CURSOR_HOME, INPUT_BUFFER_CAPACITY, OUTPUT_BUFFER_CAPACITY,
+    PASSTHROUGH_BUFFER_CAPACITY, PENDING_ESCAPE_CAPACITY, SYNC_BUFFER_CAPACITY, SYNC_END,
+    SYNC_START,
 };
 use crate::line_buffer::LineBuffer;
 use anyhow::{Context, Result};
@@ -36,6 +36,7 @@ extern "C" fn handle_sigterm(_: libc::c_int) {
 pub struct ProxyConfig {
     pub max_output_lines: usize,
     pub max_history_lines: usize,
+    pub lookback_key: String,
     pub lookback_sequence: Vec<u8>,
 }
 
@@ -44,7 +45,8 @@ impl Default for ProxyConfig {
         Self {
             max_output_lines: 100,
             max_history_lines: 100_000,
-            lookback_sequence: b"\x1b[5;6~".to_vec(),
+            lookback_key: "[ctrl][shift][j]".to_string(),
+            lookback_sequence: vec![0x0A],
         }
     }
 }
@@ -352,7 +354,8 @@ impl Proxy {
     }
 
     fn enter_lookback_mode(&mut self, stdout_fd: i32) -> Result<()> {
-        write_all_raw(stdout_fd, LOOKBACK_HEADER)?;
+        let header = b"\x1b[7m--- LOOKBACK: scroll up to see history ---\x1b[0m\r\n";
+        write_all_raw(stdout_fd, header)?;
         self.output_buffer.clear();
         self.history.append_all(&mut self.output_buffer);
         write_all_raw(stdout_fd, &self.output_buffer)?;
@@ -426,10 +429,7 @@ fn setup_raw_mode() -> Result<Option<Termios>> {
     Ok(Some(original))
 }
 
-fn setup_signal_handler(
-    signal: Signal,
-    handler: extern "C" fn(libc::c_int),
-) -> Result<()> {
+fn setup_signal_handler(signal: Signal, handler: extern "C" fn(libc::c_int)) -> Result<()> {
     let action = SigAction::new(
         SigHandler::Handler(handler),
         SaFlags::SA_RESTART,

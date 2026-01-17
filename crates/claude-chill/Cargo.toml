@@ -16,12 +16,12 @@ path = "src/lib.rs"
 name = "claude-chill"
 path = "src/bin.rs"
 
-[[bin]]
-name = "chill-analyzer"
-path = "src/analyzer.rs"
-
 [dependencies]
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
 memchr = "2"
 nix = { version = "0.30", features = ["term", "signal", "poll", "process", "fs"] }
 libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
