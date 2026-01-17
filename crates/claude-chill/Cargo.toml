@@ -1,0 +1,27 @@
+[package]
+name = "claude-chill"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+default-run = "claude-chill"
+description = "PTY proxy that reduces terminal flicker by truncating synchronized output"
+license = "MIT"
+repository = "https://github.com/davidbeesley/claude-chill"
+
+[lib]
+name = "claude_chill"
+path = "src/lib.rs"
+
+[[bin]]
+name = "claude-chill"
+path = "src/bin.rs"
+
+[[bin]]
+name = "chill-analyzer"
+path = "src/analyzer.rs"
+
+[dependencies]
+anyhow = "1"
+memchr = "2"
+nix = { version = "0.30", features = ["term", "signal", "poll", "process", "fs"] }
+libc = "0.2"
