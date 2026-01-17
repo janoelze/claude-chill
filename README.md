@@ -25,9 +25,9 @@ The full screen clears are 35x larger than incremental line clears - these are t
 claude-chill sits between your terminal and Claude Code:
 
 1. **Intercepts sync blocks** - Catches those massive atomic updates
-2. **Truncates output** - Sends only the last N lines (default: 100) to your terminal
-3. **Preserves history** - Stores the full content in a buffer
-4. **Enables lookback** - Press a key to dump the buffer, then scroll up
+2. **Truncates full screen clears** - Only the 45% that are full redraws (94.5 KB avg) get truncated to the last N lines (default: 100). The 55% incremental updates (2.7 KB avg) pass through unchanged.
+3. **Preserves history** - Accumulates content in a buffer. Clears on full screen clear, accumulates otherwise.
+4. **Enables lookback** - Press a key to pause Claude and view the full history buffer
 
 ## Installation
 
@@ -43,9 +43,16 @@ claude-chill -- claude --verbose   # Use -- for command flags
 claude-chill -l 50 -- claude       # Set max lines to 50
 ```
 
-## Lookback
+## Lookback Mode
 
-Press `Ctrl+Shift+J` to dump the history buffer to terminal. Scroll up to see it. The next update from Claude will resume normal display.
+Press `Ctrl+Shift+J` (or your configured key) to enter lookback mode:
+
+1. **Claude pauses** - Output from Claude is cached, input is blocked
+2. **History dumps** - The full history buffer is written to your terminal
+3. **Scroll freely** - Use your terminal's scrollback to review everything
+4. **Exit** - Press the lookback key again or `Ctrl+C` to resume
+
+When you exit lookback mode, any cached output is processed and the current state is displayed.
 
 ## Configuration
 

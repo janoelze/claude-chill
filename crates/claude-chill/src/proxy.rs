@@ -57,6 +57,8 @@ pub struct Proxy {
     history: LineBuffer,
     sync_buffer: Vec<u8>,
     in_sync_block: bool,
+    in_lookback_mode: bool,
+    lookback_cache: Vec<u8>,
     input_buffer: Vec<u8>,
     output_buffer: Vec<u8>,
     sync_start_finder: memmem::Finder<'static>,
@@ -114,6 +116,8 @@ impl Proxy {
             original_termios,
             sync_buffer: Vec::with_capacity(SYNC_BUFFER_CAPACITY),
             in_sync_block: false,
+            in_lookback_mode: false,
+            lookback_cache: Vec::new(),
             input_buffer: Vec::with_capacity(INPUT_BUFFER_CAPACITY),
             output_buffer: Vec::with_capacity(OUTPUT_BUFFER_CAPACITY),
             sync_start_finder: memmem::Finder::new(SYNC_START),
@@ -197,6 +201,11 @@ impl Proxy {
     }
 
     fn process_output(&mut self, data: &[u8], stdout_fd: i32) -> Result<()> {
+        if self.in_lookback_mode {
+            self.lookback_cache.extend_from_slice(data);
+            return Ok(());
+        }
+
         let mut pos = 0;
 
         while pos < data.len() {
@@ -261,36 +270,81 @@ impl Proxy {
 
     fn process_input(&mut self, data: &[u8], stdout_fd: i32) -> Result<()> {
         let master_fd = self.pty_master.as_raw_fd();
+
         for &byte in data {
+            if self.in_lookback_mode && byte == 0x03 {
+                self.input_buffer.clear();
+                self.exit_lookback_mode(stdout_fd)?;
+                continue;
+            }
+
             self.input_buffer.push(byte);
 
             if self.input_buffer.len() > self.config.lookback_sequence.len() {
                 let excess = self.input_buffer.len() - self.config.lookback_sequence.len();
-                write_all_raw(master_fd, &self.input_buffer[..excess])?;
+                if !self.in_lookback_mode {
+                    write_all_raw(master_fd, &self.input_buffer[..excess])?;
+                }
                 self.input_buffer.drain(..excess);
             }
 
             if self.input_buffer == self.config.lookback_sequence {
-                self.enter_lookback_mode(stdout_fd)?;
                 self.input_buffer.clear();
+                if self.in_lookback_mode {
+                    self.exit_lookback_mode(stdout_fd)?;
+                } else {
+                    self.enter_lookback_mode()?;
+                }
             } else if !self
                 .config
                 .lookback_sequence
                 .starts_with(&self.input_buffer)
             {
-                write_all_raw(master_fd, &self.input_buffer)?;
+                if !self.in_lookback_mode {
+                    write_all_raw(master_fd, &self.input_buffer)?;
+                }
                 self.input_buffer.clear();
             }
         }
         Ok(())
     }
 
-    fn enter_lookback_mode(&mut self, stdout_fd: i32) -> Result<()> {
-        let header = b"\x1b[7m--- LOOKBACK: scroll up to see history ---\x1b[0m\r\n";
-        write_all_raw(stdout_fd, header)?;
+    fn enter_lookback_mode(&mut self) -> Result<()> {
+        self.in_lookback_mode = true;
+        self.lookback_cache.clear();
+
         self.output_buffer.clear();
         self.history.append_all(&mut self.output_buffer);
+
+        let stdout_fd = io::stdout().as_raw_fd();
+        write_all_raw(stdout_fd, CLEAR_SCREEN)?;
+        write_all_raw(stdout_fd, CURSOR_HOME)?;
         write_all_raw(stdout_fd, &self.output_buffer)?;
+
+        let exit_msg = format!(
+            "\r\n\x1b[7m--- LOOKBACK MODE: press {} or Ctrl+C to exit ---\x1b[0m\r\n",
+            self.config.lookback_key
+        );
+        write_all_raw(stdout_fd, exit_msg.as_bytes())?;
+
+        Ok(())
+    }
+
+    fn exit_lookback_mode(&mut self, stdout_fd: i32) -> Result<()> {
+        self.in_lookback_mode = false;
+
+        let cached = std::mem::take(&mut self.lookback_cache);
+        if !cached.is_empty() {
+            self.process_output(&cached, stdout_fd)?;
+        }
+
+        self.output_buffer.clear();
+        self.history.append_all(&mut self.output_buffer);
+
+        write_all_raw(stdout_fd, CLEAR_SCREEN)?;
+        write_all_raw(stdout_fd, CURSOR_HOME)?;
+        write_all_raw(stdout_fd, &self.output_buffer)?;
+
         Ok(())
     }
 
