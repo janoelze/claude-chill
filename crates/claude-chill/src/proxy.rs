@@ -602,6 +602,9 @@ impl Proxy {
         self.output_buffer.clear();
         self.history.append_all(&mut self.output_buffer);
 
+        // Filter out bell characters to prevent audible alerts on replay
+        self.output_buffer.retain(|&b| b != 0x07);
+
         write_all(stdout_fd, CLEAR_SCREEN)?;
         write_all(stdout_fd, CURSOR_HOME)?;
         write_all(stdout_fd, &self.output_buffer)?;
@@ -697,6 +700,10 @@ impl Proxy {
 
         self.output_buffer.clear();
         self.history.append_all(&mut self.output_buffer);
+
+        // Filter out bell characters to prevent audible alerts on replay
+        self.output_buffer.retain(|&b| b != 0x07);
+
         debug!(
             "enter_lookback_mode: output_buffer_len={}",
             self.output_buffer.len()
